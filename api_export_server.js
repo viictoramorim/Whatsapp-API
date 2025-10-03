@@ -15,8 +15,15 @@ let isReady = false;
 const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: {
-    headless: true, // NÃO abre janela visível
-    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    headless: false, // NÃO abre janela visível
+    args: ['--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-extensions',
+    '--disable-background-networking',
+    '--disable-background-timer-throttling',
+    '--disable-renderer-backgrounding',
+    '--disable-device-discovery-notifications']
     // Se der problema com headless, troque para headless: false temporariamente
   }
 });
