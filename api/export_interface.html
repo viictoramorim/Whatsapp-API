@@ -15,7 +15,7 @@
 <body class="p-4 sm:p-8 bg-gray-50 min-h-screen">
     <div class="max-w-4xl mx-auto bg-white p-6 sm:p-10 rounded-xl shadow-2xl border border-gray-100">
         <h1 class="text-3xl font-extrabold text-green-700 mb-2">Exportar Mensagens Simplificado</h1>
-        <p class="text-gray-600 mb-8">Preencha a data e o ID (número) do contato para exportar. O arquivo JSONL será criado na sua pasta.</p>
+        <p class="text-gray-600 mb-8">Preencha a data e o ID do contato para exportar. O arquivo JSONL será criado na sua pasta.</p>
 
         <!-- Formulário de Exportação -->
         <form id="exportForm" class="space-y-6">
@@ -26,10 +26,11 @@
             </div>
 
             <div>
-                <label for="chatId" class="block text-sm font-medium text-gray-700 mb-1">ID do Chat / Contato (Opcional):</label>
-                <p class="text-xs text-gray-500 mb-2">Ex: 5511998765432@c.us (ou deixe vazio para exportar todos os chats)</p>
-                <input type="text" id="chatId" placeholder="Ex: 5511987654321@c.us"
-                    class="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-green-500 focus:border-green-500 transition duration-150">
+                <label for="chatId" class="block text-sm font-medium text-gray-700 mb-1">ID do Chat / Contato (Apenas Número):</label>
+                <p class="text-xs text-red-500 font-semibold mb-2">Este campo agora é OBRIGATÓRIO. Insira APENAS os dígitos (Ex: 5511998765432).</p>
+                <!-- OBRIGATÓRIO (required) e Placeholder ajustado para apenas números -->
+                <input type="text" id="chatId" placeholder="Ex: 5511987654321 (Apenas números)" required
+                    class="w-full px-4 py-2 border border-red-400 rounded-lg shadow-sm focus:ring-green-500 focus:border-green-500 transition duration-150">
             </div>
 
             <button type="submit"
@@ -112,20 +113,27 @@
             }
 
             const date = document.getElementById('exportDate').value;
-            const chatId = chatIdInput.value.trim();
+            const rawChatId = chatIdInput.value.trim();
 
             if (!date) {
                 log('Por favor, selecione uma data.', true);
                 return;
             }
-
-            let exportUrl = `${apiUrl}/export?date=${date}`;
-            if (chatId) {
-                exportUrl += `&chatId=${encodeURIComponent(chatId)}`;
-                log(`Iniciando exportação para o Chat ID: ${chatId} na data: ${date}...`, true);
-            } else {
-                log(`Iniciando exportação para TODOS os chats na data: ${date}...`, true);
+            
+            // NOVIDADE: Limpa o ID do chat (remove tudo que não for dígito) e adiciona o sufixo @c.us
+            const cleanedChatId = rawChatId.replace(/\D/g, ''); // Remove não-dígitos
+            
+            if (!cleanedChatId) {
+                // Embora o 'required' do HTML já ajude, essa validação é extra
+                log('Erro: O ID do contato deve conter apenas números válidos.', true);
+                return;
             }
+
+            const targetChatId = `${cleanedChatId}@c.us`; // Formato final para a API
+
+            let exportUrl = `${apiUrl}/export?date=${date}&chatId=${encodeURIComponent(targetChatId)}`;
+            
+            log(`Iniciando exportação para o Chat ID (formatado): ${targetChatId} na data: ${date}...`, true);
 
             try {
                 // Fetch para iniciar a exportação (API responde em stream)
@@ -160,7 +168,6 @@
         // 3. Listar Chats
         showChatsBtn.addEventListener('click', async () => {
             if (!(await checkStatus())) {
-                // Ao invés de alert, usamos o log
                 log('A API não está pronta. Não é possível listar os chats. Verifique o terminal para o QR Code.', true);
                 return;
             }
@@ -188,8 +195,10 @@
                         
                         // Clique para Copiar e Preencher
                         div.addEventListener('click', () => {
-                            chatIdInput.value = chat.id; // Preenche o campo
-                            log(`ID do Chat copiado e preenchido no campo: ${chat.id}`);
+                            // NOVIDADE: Preenche o campo apenas com o número, sem o @c.us
+                            const simpleId = chat.id.split('@')[0]; 
+                            chatIdInput.value = simpleId; // Preenche o campo
+                            log(`ID do Chat (apenas número) copiado e preenchido no campo: ${simpleId}`);
                             chatsListContainer.classList.add('hidden'); // Oculta após seleção
                             showChatsBtn.textContent = 'Passo 1: Listar Todos os Chat IDs'; // Volta o botão
                         });

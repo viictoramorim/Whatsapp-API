@@ -14,7 +14,11 @@ let isReady = false;
 
 // Configuração do Cliente WhatsApp
 const client = new Client({
-  authStrategy: new LocalAuth({ clientId: 'export_api_session' }), // Usando LocalAuth para persistência da sessão
+  authStrategy: new LocalAuth({ 
+    clientId: 'export_api_session',
+    // NOVIDADE: Mover o armazenamento da sessão para uma subpasta dedicada
+    dataPath: './.session_data' 
+}), 
   puppeteer: {
     headless: false, // Mantido como false para visualização (opcionalmente mude para true)
     slowMo: 100, // Pequeno delay para estabilizar a injeção do script do whatsapp-web.js
@@ -45,7 +49,7 @@ client.on('ready', () => {
 });
 
 client.on('auth_failure', (msg) => {
-  console.error('Falha de autenticação. Tente excluir a pasta de sessão (.wwebjs_auth) e escanear o QR novamente.', msg);
+  console.error('Falha de autenticação. Tente excluir a pasta de sessão (.session_data) e escanear o QR novamente.', msg);
   isReady = false;
 });
 
@@ -55,6 +59,9 @@ client.on('disconnected', (reason) => {
 });
 
 client.initialize();
+
+// Middleware para servir arquivos estáticos (como export_interface.html)
+app.use(express.static(__dirname));
 
 // status
 app.get('/status', (req, res) => {
@@ -67,11 +74,14 @@ app.get('/chats', async (req, res) => {
     
     try {
         const chats = await client.getChats();
-        const chatList = chats.map(chat => ({
-            id: chat.id._serialized,
-            name: chat.name || chat.formattedTitle || 'N/A',
-            isGroup: chat.isGroup
-        }));
+        // Filtra para mostrar apenas contatos e grupos relevantes (removendo "Status" e outros chats internos)
+        const chatList = chats
+            .filter(chat => !chat.isStatusV3)
+            .map(chat => ({
+                id: chat.id._serialized,
+                name: chat.name || chat.formattedTitle || 'N/A',
+                isGroup: chat.isGroup
+            }));
         res.json(chatList);
     } catch (err) {
         console.error('Erro ao listar chats:', err);
@@ -159,4 +169,14 @@ app.get('/export', async (req, res) => {
 
     res.write(`Concluído. Arquivo salvo: ${outFile}\n`);
     res.end();
+});
+
+// Adiciona rota raiz para servir a interface diretamente
+app.get('/', (req, res) => {
+    res.sendFile(__dirname + '/export_interface.html');
+});
+
+app.listen(PORT, () => {
+  console.log(`API rodando em http://localhost:${PORT}`);
+  console.log(`Interface Simplificada: http://localhost:${PORT}`);
 });
