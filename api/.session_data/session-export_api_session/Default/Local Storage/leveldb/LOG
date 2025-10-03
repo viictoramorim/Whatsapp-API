@@ -1,4 +1,5 @@
-2025/10/02-23:42:43.645 3164 Creating DB C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\Local Storage\leveldb since it was missing.
-2025/10/02-23:42:43.655 3164 Reusing MANIFEST C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\Local Storage\leveldb/MANIFEST-000001
-2025/10/02-23:42:43.655 3164 Recovering log #3
-2025/10/02-23:42:43.656 3164 Reusing old log C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\Local Storage\leveldb/000003.log 
+2025/10/03-00:06:21.777 16d0 Reusing MANIFEST C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\Local Storage\leveldb/MANIFEST-000001
+2025/10/03-00:06:21.783 16d0 Recovering log #4
+2025/10/03-00:06:21.887 16d0 Level-0 table #6: started
+2025/10/03-00:06:21.995 16d0 Level-0 table #6: 20081 bytes OK
+2025/10/03-00:06:22.002 16d0 Delete type=0 #4

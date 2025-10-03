@@ -1,245 +1,300 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WhatsApp Export - Interface Simplificada</title>
+    <title>Exportador de Mensagens WhatsApp</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
+        /* Estilos customizados para o scroll e aparência */
         body {
             font-family: 'Inter', sans-serif;
-            background-color: #f7fafc;
+            background-color: #f4f7f9;
         }
-        /* Estilo para o spinner de carregamento */
-        .spinner {
+        .scrollable-output, .message-preview {
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap; /* Mantém a formatação do texto (quebras de linha) */
+            word-wrap: break-word; /* Garante que linhas longas quebrem */
+        }
+        .status-ready {
+            background-color: #d1fae5;
+            color: #065f46;
+        }
+        .status-error {
+            background-color: #fee2e2;
+            color: #991b1b;
+        }
+        .loading-spinner {
             border: 4px solid rgba(0, 0, 0, 0.1);
+            border-left-color: #3b82f6;
+            border-radius: 50%;
             width: 24px;
             height: 24px;
-            border-radius: 50%;
-            border-left-color: #fff;
-            animation: spin 1s ease infinite;
+            animation: spin 1s linear infinite;
         }
         @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+            to { transform: rotate(360deg); }
         }
     </style>
 </head>
-<body class="p-4 sm:p-8 bg-gray-50 min-h-screen">
-    <div class="max-w-4xl mx-auto bg-white p-6 sm:p-10 rounded-xl shadow-2xl border border-gray-100">
-        <h1 class="text-3xl font-extrabold text-green-700 mb-2">Exportar Mensagens Simplificado</h1>
-        <p class="text-gray-600 mb-8">Preencha a data e o ID do contato para exportar. O arquivo **TXT** será baixado automaticamente.</p>
+<body class="p-4 md:p-8">
 
-        <!-- Formulário de Exportação -->
-        <form id="exportForm" class="space-y-6">
-            <div>
-                <label for="exportDate" class="block text-sm font-medium text-gray-700 mb-1">Data (YYYY-MM-DD):</label>
-                <input type="date" id="exportDate" required
-                    class="w-full px-4 py-2 border border-gray-300 rounded-lg shadow-sm focus:ring-green-500 focus:border-green-500 transition duration-150">
-            </div>
+    <div class="max-w-4xl mx-auto bg-white shadow-2xl rounded-xl p-6 md:p-10">
+        <h1 class="text-3xl font-bold text-gray-800 mb-2">Exportador WhatsApp Simplificado</h1>
+        <p class="text-gray-600 mb-6">Gere um arquivo TXT de todas as mensagens trocadas com um contato em um dia específico.</p>
 
-            <div>
-                <label for="chatId" class="block text-sm font-medium text-gray-700 mb-1">ID do Chat / Contato (Apenas Número):</label>
-                <p class="text-xs text-red-500 font-semibold mb-2">Este campo agora é OBRIGATÓRIO. Insira APENAS os dígitos (Ex: 5511998765432).</p>
-                <!-- OBRIGATÓRIO (required) e Placeholder ajustado para apenas números -->
-                <input type="text" id="chatId" placeholder="Ex: 5511987654321 (Apenas números)" required
-                    class="w-full px-4 py-2 border border-red-400 rounded-lg shadow-sm focus:ring-green-500 focus:border-green-500 transition duration-150">
-            </div>
+        <!-- Status da API -->
+        <div id="api-status" class="status-error p-3 rounded-lg text-center font-semibold transition duration-300 mb-6">
+            🔴 API NÃO CONECTADA. Aguardando...
+        </div>
 
-            <button type="submit" id="submitBtn"
-                class="w-full flex items-center justify-center py-3 px-4 border border-transparent rounded-lg shadow-md text-base font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-150 transform hover:scale-[1.01]">
-                <span id="buttonText">INICIAR EXPORTAÇÃO</span>
-                <div id="loadingSpinner" class="spinner hidden ml-3"></div>
-            </button>
-        </form>
-
-        <!-- Ajuda e Status -->
-        <div class="mt-8 border-t pt-6">
-            <h2 class="text-xl font-semibold text-gray-800 mb-4">Ajuda & Status</h2>
-
-            <div id="statusMessage" class="mb-4 p-3 rounded-lg text-sm bg-blue-100 text-blue-800">
-                Verificando status da API...
-            </div>
-            
-            <button id="showChatsBtn"
-                class="w-full py-2 px-4 mb-4 border border-gray-300 rounded-lg shadow-sm text-sm font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-300 transition duration-150">
-                Passo 1: Listar Todos os Chat IDs
-            </button>
-
-            <div id="chatsListContainer" class="hidden max-h-64 overflow-y-auto bg-gray-100 p-4 rounded-lg text-sm">
-                <p class="text-gray-600 font-semibold mb-2">Clique no chat desejado para preencher o campo de número:</p>
-                <div id="chatsList" class="space-y-1">
-                    <!-- Chats serão injetados aqui -->
+        <form id="export-form" class="space-y-6">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <!-- Campo ID do Contato -->
+                <div>
+                    <label for="chatIdInput" class="block text-sm font-medium text-gray-700 mb-1">ID do Chat / Contato (Apenas Números)</label>
+                    <input type="text" id="chatIdInput" name="chatId" required 
+                           placeholder="Ex: 5511987654321"
+                           pattern="[0-9]*"
+                           title="Apenas números são permitidos, sem caracteres especiais."
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
+                    <p class="text-xs text-gray-500 mt-1">Insira apenas os dígitos. O sufixo '@c.us' será adicionado automaticamente.</p>
+                </div>
+                
+                <!-- Campo Data -->
+                <div>
+                    <label for="dateInput" class="block text-sm font-medium text-gray-700 mb-1">Data de Exportação (Obrigatório)</label>
+                    <input type="date" id="dateInput" name="date" required 
+                           class="w-full p-3 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500">
                 </div>
             </div>
 
-            <h3 class="text-lg font-medium text-gray-800 mt-6 mb-2">Log de Download:</h3>
-            <pre id="outputLog" class="whitespace-pre-wrap p-4 bg-gray-800 text-white rounded-lg text-xs h-40 overflow-y-scroll shadow-inner">Ao iniciar a exportação, o arquivo será baixado diretamente. O log aqui exibirá apenas o status final.</pre>
+            <div class="flex flex-col sm:flex-row gap-4">
+                <button type="submit" id="submit-button"
+                        class="w-full sm:w-2/3 bg-blue-600 text-white font-bold py-3 px-4 rounded-lg shadow-md hover:bg-blue-700 transition duration-150 flex items-center justify-center disabled:opacity-50"
+                        disabled>
+                    <span id="button-text">INICIAR EXPORTAÇÃO</span>
+                    <div id="loading-spinner" class="loading-spinner ml-3 hidden"></div>
+                </button>
+                <button type="button" id="fetch-chats-button"
+                        class="w-full sm:w-1/3 bg-gray-200 text-gray-800 font-bold py-3 px-4 rounded-lg shadow-md hover:bg-gray-300 transition duration-150 disabled:opacity-50"
+                        disabled>
+                    Passo 1: Listar Chats
+                </button>
+            </div>
+        </form>
+
+        <hr class="my-8">
+
+        <!-- Área de Listagem de Chats -->
+        <div id="chat-list-area" class="mt-6">
+            <h2 class="text-xl font-semibold text-gray-800 mb-3">Chats Encontrados (Clique para usar o ID)</h2>
+            <div id="chat-list" class="bg-gray-50 p-4 rounded-lg border border-gray-200 scrollable-output">
+                <p class="text-gray-500">Clique em "Passo 1: Listar Chats" para carregar.</p>
+            </div>
+        </div>
+
+        <hr class="my-8">
+
+        <!-- Área de Visualização de Mensagens -->
+        <div id="preview-area" class="mt-6">
+            <h2 class="text-xl font-semibold text-gray-800 mb-3">Visualização de Mensagens (.txt)</h2>
+            <div id="download-link-container" class="mb-4 hidden">
+                <p class="text-green-600 font-bold">Arquivo gerado! <a id="download-link" href="#" class="text-blue-600 underline hover:text-blue-800">Clique aqui para baixar o TXT</a></p>
+            </div>
+            <div id="message-preview" class="message-preview bg-gray-900 text-green-400 p-4 rounded-lg border border-gray-700 text-sm">
+                Aguardando exportação...
+            </div>
         </div>
 
     </div>
 
     <script>
-        const PORT = 3000;
-        const apiUrl = `http://localhost:${PORT}`;
-        const exportForm = document.getElementById('exportForm');
-        const outputLog = document.getElementById('outputLog');
-        const statusMessage = document.getElementById('statusMessage');
-        const showChatsBtn = document.getElementById('showChatsBtn');
-        const chatsListContainer = document.getElementById('chatsListContainer');
-        const chatsList = document.getElementById('chatsList');
-        const chatIdInput = document.getElementById('chatId');
-        const submitBtn = document.getElementById('submitBtn');
-        const buttonText = document.getElementById('buttonText');
-        const loadingSpinner = document.getElementById('loadingSpinner');
+        const API_URL = 'http://localhost:3000';
+        const apiStatus = document.getElementById('api-status');
+        const submitButton = document.getElementById('submit-button');
+        const fetchChatsButton = document.getElementById('fetch-chats-button');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const buttonText = document.getElementById('button-text');
+        const chatListDiv = document.getElementById('chat-list');
+        const form = document.getElementById('export-form');
+        const chatIdInput = document.getElementById('chatIdInput');
+        const messagePreview = document.getElementById('message-preview');
+        const downloadLinkContainer = document.getElementById('download-link-container');
+        const downloadLink = document.getElementById('download-link');
 
-        // Função utilitária para registrar no log
-        function log(message, clear = false) {
-            if (clear) outputLog.textContent = '';
-            outputLog.textContent += message + '\n';
-            outputLog.scrollTop = outputLog.scrollHeight;
-        }
-        
-        // Função para mostrar/esconder o carregamento
-        function setProcessing(isProcessing) {
-            submitBtn.disabled = isProcessing;
-            if (isProcessing) {
-                buttonText.textContent = 'PROCESSANDO...';
-                loadingSpinner.classList.remove('hidden');
+        // --- Funções de Estado e UI ---
+
+        function setStatus(ready, message) {
+            if (ready) {
+                apiStatus.className = 'status-ready p-3 rounded-lg text-center font-semibold transition duration-300 mb-6';
+                submitButton.disabled = false;
+                fetchChatsButton.disabled = false;
             } else {
-                buttonText.textContent = 'INICIAR EXPORTAÇÃO';
+                apiStatus.className = 'status-error p-3 rounded-lg text-center font-semibold transition duration-300 mb-6';
+                submitButton.disabled = true;
+                fetchChatsButton.disabled = true;
+            }
+            apiStatus.innerHTML = message;
+        }
+
+        function setLoading(isLoading) {
+            submitButton.disabled = isLoading || !apiStatus.classList.contains('status-ready');
+            fetchChatsButton.disabled = isLoading || !apiStatus.classList.contains('status-ready');
+            
+            if (isLoading) {
+                loadingSpinner.classList.remove('hidden');
+                buttonText.textContent = 'EXPORTANDO...';
+                messagePreview.textContent = 'Gerando arquivo TXT no servidor... Por favor, aguarde.';
+            } else {
                 loadingSpinner.classList.add('hidden');
+                buttonText.textContent = 'INICIAR EXPORTAÇÃO';
             }
         }
 
-        // 1. Verificar Status Inicial
+        // --- Lógica de Listagem de Chats ---
+
+        async function fetchChats() {
+            chatListDiv.innerHTML = '<p class="text-blue-500">Carregando chats...</p>';
+            try {
+                const response = await fetch(`${API_URL}/chats`);
+                const chats = await response.json();
+
+                if (response.status !== 200) {
+                    chatListDiv.innerHTML = `<p class="text-red-600">Erro: ${chats.message || 'Falha ao buscar chats.'}</p>`;
+                    return;
+                }
+
+                if (chats.length === 0) {
+                    chatListDiv.innerHTML = '<p class="text-gray-500">Nenhum chat encontrado ou erro na listagem.</p>';
+                    return;
+                }
+
+                chatListDiv.innerHTML = '';
+                chats.forEach(chat => {
+                    // Remove o sufixo @c.us ou @g.us para o input
+                    const rawId = chat.id.split('@')[0];
+                    const element = document.createElement('div');
+                    const isGroup = chat.isGroup ? ' (GRUPO)' : '';
+                    element.className = 'p-2 my-1 bg-white hover:bg-blue-50 cursor-pointer rounded-md transition duration-100 border-b border-gray-100';
+                    element.innerHTML = `<span class="font-semibold">${chat.name}</span>${isGroup} <span class="text-xs text-gray-500 ml-2">ID: ${rawId}</span>`;
+                    element.onclick = () => {
+                        chatIdInput.value = rawId;
+                        // Feedback visual simples
+                        chatIdInput.focus();
+                        chatIdInput.classList.add('ring-2', 'ring-blue-500');
+                        setTimeout(() => chatIdInput.classList.remove('ring-2', 'ring-blue-500'), 500);
+                    };
+                    chatListDiv.appendChild(element);
+                });
+
+            } catch (error) {
+                console.error('Erro na requisição de chats:', error);
+                chatListDiv.innerHTML = '<p class="text-red-600">Erro de rede/servidor ao listar chats.</p>';
+            }
+        }
+
+        fetchChatsButton.addEventListener('click', fetchChats);
+
+
+        // --- Lógica de Exportação (Submissão) ---
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            setLoading(true);
+            messagePreview.textContent = 'Gerando arquivo TXT no servidor... Por favor, aguarde.';
+            downloadLinkContainer.classList.add('hidden');
+
+            const date = document.getElementById('dateInput').value;
+            const rawChatId = chatIdInput.value;
+
+            // Limpa o rawChatId e garante que é apenas o número
+            const cleanChatId = rawChatId.replace(/\D/g, ''); 
+            
+            // Adiciona o sufixo @c.us/g.us para a API (Assumindo que é contato individual se só tiver número)
+            let formattedChatId = cleanChatId ? `${cleanChatId}@c.us` : ''; 
+            
+            // Se o usuário copiou um ID completo do grupo, não adicionamos @c.us novamente
+            if (rawChatId.includes('@g.us')) {
+                formattedChatId = rawChatId;
+            } else if (cleanChatId.length < 10) {
+                // Se o ID for muito curto, mantemos o que foi digitado, mas geralmente esperamos um número completo
+                formattedChatId = rawChatId; 
+            }
+
+
+            const params = new URLSearchParams({
+                date: date,
+                chatId: formattedChatId
+            }).toString();
+
+            try {
+                // 1. CHAMA A API PARA GERAR O ARQUIVO TXT NO SERVIDOR
+                const response = await fetch(`${API_URL}/export?${params}`);
+                const result = await response.json();
+
+                if (response.status !== 200 || !result.success) {
+                    messagePreview.textContent = `[ERRO] ${result.message || 'Falha desconhecida na exportação.'}`;
+                    messagePreview.classList.add('text-red-400');
+                    return;
+                }
+                
+                const filename = result.filename;
+                
+                // 2. CONFIGURA O LINK DE DOWNLOAD
+                downloadLink.href = `${API_URL}/${filename}`;
+                downloadLinkContainer.classList.remove('hidden');
+
+                // 3. BUSCA O CONTEÚDO DO ARQUIVO PARA VISUALIZAÇÃO
+                messagePreview.textContent = 'Arquivo gerado. Buscando conteúdo para visualização...';
+                
+                const fileResponse = await fetch(`${API_URL}/${filename}`);
+                if (fileResponse.ok) {
+                    const textContent = await fileResponse.text();
+                    messagePreview.textContent = textContent;
+                    messagePreview.classList.remove('text-red-400');
+                } else {
+                    messagePreview.textContent = `[ERRO] Arquivo TXT gerado, mas falhou ao buscar o conteúdo para visualização. Status: ${fileResponse.status}`;
+                    messagePreview.classList.add('text-red-400');
+                }
+                
+                // Feedback final
+                setStatus(true, `✅ Exportação concluída! ${result.message}`);
+
+            } catch (error) {
+                console.error('Erro de exportação:', error);
+                messagePreview.textContent = `[ERRO GERAL] Falha na comunicação com a API: ${error.message}`;
+                messagePreview.classList.add('text-red-400');
+            } finally {
+                setLoading(false);
+            }
+        });
+
+
+        // --- Verificação de Status Inicial ---
+
         async function checkStatus() {
             try {
-                const response = await fetch(`${apiUrl}/status`);
+                const response = await fetch(`${API_URL}/status`);
                 const data = await response.json();
+                
                 if (data.ready) {
-                    statusMessage.className = 'mb-4 p-3 rounded-lg text-sm bg-green-100 text-green-800';
-                    statusMessage.textContent = '✅ API PRONTA. Você pode iniciar a exportação.';
-                    return true;
+                    setStatus(true, '✅ API PRONTA. WhatsApp conectado.');
                 } else {
-                    statusMessage.className = 'mb-4 p-3 rounded-lg text-sm bg-yellow-100 text-yellow-800';
-                    statusMessage.textContent = '⚠️ API NÃO PRONTA. Verifique o terminal para escanear o QR Code.';
-                    return false;
+                    setStatus(false, '⚠️ API AGUARDANDO CONEXÃO. Verifique o QR Code no terminal.');
+                    // Tenta checar novamente em 3 segundos se não estiver pronto
+                    setTimeout(checkStatus, 3000); 
                 }
             } catch (error) {
-                statusMessage.className = 'mb-4 p-3 rounded-lg text-sm bg-red-100 text-red-800';
-                statusMessage.textContent = '❌ Erro ao conectar com a API. Certifique-se de que o Node.js está rodando em localhost:3000.';
-                return false;
+                setStatus(false, '❌ ERRO DE CONEXÃO. Servidor Node.js não está rodando em http://localhost:3000.');
+                // Tenta checar novamente em 5 segundos
+                setTimeout(checkStatus, 5000); 
             }
         }
-        
-        // 2. Lidar com o Formulário de Exportação
-        exportForm.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            setProcessing(true); // Inicia o carregamento
 
-            if (!(await checkStatus())) {
-                log('Erro: O cliente WhatsApp não está pronto. Verifique o status.', true);
-                setProcessing(false);
-                return;
-            }
-
-            const date = document.getElementById('exportDate').value;
-            const rawChatId = chatIdInput.value.trim();
-
-            // Lógica de validação e formatação (permanece a mesma)
-            const cleanedChatId = rawChatId.replace(/\D/g, ''); 
-            
-            if (!cleanedChatId) {
-                log('Erro: O ID do contato deve conter apenas números válidos.', true);
-                setProcessing(false);
-                return;
-            }
-
-            const targetChatId = `${cleanedChatId}@c.us`;
-
-            let exportUrl = `${apiUrl}/export?date=${date}&chatId=${encodeURIComponent(targetChatId)}`;
-            
-            log(`Solicitando exportação para ${targetChatId} na data ${date}. O download começará automaticamente...`, true);
-
-            try {
-                // O fetch é feito e o navegador cuidará do download (res.download)
-                const response = await fetch(exportUrl);
-                
-                if (!response.ok) {
-                    // Se houver erro, a resposta é texto simples com a mensagem de erro
-                    const errorText = await response.text();
-                    log(`ERRO na API: ${errorText}`);
-                } else {
-                    // Se OK (200), o navegador inicia o download automaticamente
-                    log(`\n✅ EXPORTAÇÃO CONCLUÍDA! O arquivo .TXT foi baixado no seu PC.`);
-                }
-                
-
-            } catch (error) {
-                log(`Erro de conexão ou rede: ${error.message}.`);
-            } finally {
-                setProcessing(false);
-            }
-        });
-
-        // 3. Listar Chats (sem alterações funcionais)
-        showChatsBtn.addEventListener('click', async () => {
-            if (!(await checkStatus())) {
-                log('A API não está pronta. Não é possível listar os chats. Verifique o terminal para o QR Code.', true);
-                return;
-            }
-
-            if (chatsListContainer.classList.contains('hidden')) {
-                chatsListContainer.classList.remove('hidden');
-                showChatsBtn.textContent = 'Ocultar Lista de Chats';
-                chatsList.innerHTML = '<p class="text-center text-gray-500">Carregando chats...</p>';
-
-                try {
-                    const response = await fetch(`${apiUrl}/chats`);
-                    const data = await response.json();
-
-                    chatsList.innerHTML = ''; 
-
-                    if (data.length === 0) {
-                        chatsList.innerHTML = '<p class="text-center text-gray-500">Nenhum chat encontrado.</p>';
-                        return;
-                    }
-                    
-                    data.forEach(chat => {
-                        const div = document.createElement('div');
-                        div.className = 'p-2 bg-white rounded-lg shadow-sm hover:bg-green-50 cursor-pointer transition duration-100';
-                        div.innerHTML = `<span class="font-bold text-gray-800">${chat.name}</span> <span class="text-gray-500">(${chat.isGroup ? 'Grupo' : 'Individual'})</span><br><code class="text-xs text-green-600">${chat.id}</code>`;
-                        
-                        // Clique para Copiar e Preencher
-                        div.addEventListener('click', () => {
-                            const simpleId = chat.id.split('@')[0]; 
-                            chatIdInput.value = simpleId; 
-                            log(`ID do Chat (apenas número) copiado e preenchido no campo: ${simpleId}`);
-                            chatsListContainer.classList.add('hidden'); 
-                            showChatsBtn.textContent = 'Passo 1: Listar Todos os Chat IDs'; 
-                        });
-                        
-                        chatsList.appendChild(div);
-                    });
-
-                } catch (error) {
-                    chatsList.innerHTML = `<p class="text-center text-red-500">Erro ao carregar chats: ${error.message}</p>`;
-                }
-
-            } else {
-                chatsListContainer.classList.add('hidden');
-                showChatsBtn.textContent = 'Passo 1: Listar Todos os Chat IDs';
-            }
-        });
-
-
-        // Inicialização
-        document.addEventListener('DOMContentLoaded', () => {
-            checkStatus();
-            const today = new Date().toISOString().split('T')[0];
-            document.getElementById('exportDate').value = today;
-        });
+        // Inicializa a verificação
+        checkStatus();
     </script>
 </body>
 </html>

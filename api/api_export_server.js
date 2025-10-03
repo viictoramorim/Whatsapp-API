@@ -1,14 +1,11 @@
 // api_export_terminal_qr.js
-// npm i whatsapp-web.js qrcode-terminal dayjs express puppeteer
+// npm i whatsapp-web.js qrcode-terminal dayjs express
 
 const express = require('express');
 const fs = require('fs');
 const dayjs = require('dayjs');
 const qrcode = require('qrcode-terminal');
-const { Client, LocalAuth } = require('whatsapp-web.js');
-
-// Para estabilidade do Puppeteer
-const puppeteer = require('puppeteer');
+const { Client } = require('whatsapp-web.js'); // Removido o import do LocalAuth
 
 // Adiciona o plugin para formatar o timestamp de forma legível
 const customParseFormat = require('dayjs/plugin/customParseFormat');
@@ -25,21 +22,22 @@ let isReady = false;
 
 // Configuração do Cliente WhatsApp
 const client = new Client({
-  authStrategy: new LocalAuth({ 
-    clientId: 'export_api_session',
-    // Mover o armazenamento da sessão para uma subpasta dedicada
-    dataPath: './.session_data' 
-}), 
+  // NÃO HÁ ESTRATÉGIA DE AUTENTICAÇÃO (LocalAuth) AQUI.
+  // Isso garante que o QR Code seja solicitado a cada inicialização.
   puppeteer: {
+    // BROWSER VISÍVEL
     headless: false,
     slowMo: 100, 
-    // Usar o caminho do executável para garantir que o Chromium seja encontrado
-    executablePath: puppeteer.executablePath(), 
+    
+    // ATENÇÃO: Se quiser usar o seu Google Chrome normal (não o de teste),
+    // DESCOMENTE a linha abaixo e COLOQUE O CAMINHO CORRETO do executável.
+    // Exemplo Windows: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+    // executablePath: 'INSIRA AQUI O CAMINHO COMPLETO DO SEU CHROME', 
+
     args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        // Removidas flags potencialmente instáveis
         '--disable-extensions',
         '--disable-gpu',
     ]
@@ -58,32 +56,30 @@ client.on('ready', () => {
 });
 
 client.on('auth_failure', (msg) => {
-  console.error('Falha de autenticação. Tente excluir a pasta de sessão (.session_data) e escanear o QR novamente.', msg);
+  console.error('Falha de autenticação. Um novo QR Code deve ser gerado na próxima inicialização.', msg);
   isReady = false;
 });
 
 client.on('disconnected', (reason) => {
-  console.log('Desconectado:', reason);
+  console.log('Desconectado. A sessão não será salva e exigirá um novo QR na próxima vez.', reason);
   isReady = false;
 });
 
 // Tratamento de inicialização assíncrona
 async function initializeClient() {
     try {
-        console.log('Iniciando cliente WhatsApp...');
+        console.log('Iniciando cliente WhatsApp (Browser Visível)...');
         await client.initialize();
     } catch (error) {
         console.error('❌ Erro na inicialização do cliente:', error.message);
-        // Tenta reiniciar ou apenas falha com uma mensagem clara
-        // Se este erro ocorrer, é melhor revisar a instalação do puppeteer
     }
 }
 
 initializeClient();
 
 
-// Middleware para servir arquivos estáticos (como export_interface.html)
-app.use(express.static(__dirname));
+// Middleware para servir arquivos estáticos (como export_interface.html e os arquivos TXT)
+app.use(express.static(__dirname)); 
 
 // status
 app.get('/status', (req, res) => {
@@ -96,7 +92,6 @@ app.get('/chats', async (req, res) => {
     
     try {
         const chats = await client.getChats();
-        // Filtra para mostrar apenas contatos e grupos relevantes
         const chatList = chats
             .filter(chat => !chat.isStatusV3)
             .map(chat => ({
@@ -112,7 +107,7 @@ app.get('/chats', async (req, res) => {
 });
 
 
-// exporta mensagens por data e por contato (e agora força o download do TXT)
+// exporta mensagens por data e por contato (gera o TXT, mas não força o download)
 app.get('/export', async (req, res) => {
   if (!isReady) return res.status(400).send('Cliente não está pronto. Escaneie o QR no terminal.');
   
@@ -123,28 +118,26 @@ app.get('/export', async (req, res) => {
 
     // Inicio do bloco TRY principal para toda a lógica de exportação
     try { 
+        // Define o início (00:00:00) e o fim (23:59:59) do dia para a filtragem
         const start = dayjs(date).startOf('day').unix();
         const end = dayjs(date).endOf('day').unix();
         
         let chatsToProcess = [];
-        let chatTitle = 'MultiplosChats'; // Título padrão
+        let chatTitle = 'MultiplosChats'; 
         let fileNameBase = `${date}`;
 
         // Lógica de Filtragem de Chat
         if (targetChatId) {
-            // Chat específico
             console.log(`[API LOG] Buscando chat específico: ${targetChatId}...`);
             const chat = await client.getChatById(targetChatId);
             
             if (!chat) {
-                // Se o chat não for encontrado, tratamos o erro aqui
                 return res.status(404).send(`Chat com ID ${targetChatId} não encontrado.`);
             }
             chatsToProcess.push(chat);
             chatTitle = chat.name || chat.formattedTitle || targetChatId.split('@')[0];
             fileNameBase = `${date}-${targetChatId.split('@')[0]}`; 
         } else {
-            // Todos os chats (comportamento original)
             console.log('[API LOG] Buscando todos os chats...');
             chatsToProcess = await client.getChats();
         }
@@ -171,15 +164,61 @@ Chat(s) Processado(s): ${targetChatId ? chatTitle : 'Todos os Chats'}
             const currentChatTitle = chat.name || chat.formattedTitle || chat.id._serialized;
             console.log(`[API LOG] Processando: ${currentChatTitle}`);
             
-            // Pega as últimas 1000 mensagens
-            let messages = await chat.fetchMessages({ limit: 1000 });
-            
-            // Filtra por data exata (timestamp em segundos)
-            messages = messages.filter(m => m.timestamp >= start && m.timestamp <= end);
+            // NOVO: Mecanismo de paginação para buscar todas as mensagens necessárias para cobrir o dia.
+            let allMessages = [];
+            let lastMessageId = null;
+            // Reduzido para 1000 para maior estabilidade em cada passo da paginação profunda
+            const BATCH_SIZE = 1000; 
+            let foundAllDay = false;
 
-            if (messages.length === 0) {
-                continue;
+            console.log(`[API LOG] -> Iniciando busca paginada para ${currentChatTitle}...`);
+
+            // Continuar buscando em batches (lotes) até que a primeira mensagem buscada seja anterior ao início do dia (start)
+            while (!foundAllDay) {
+                const options = {
+                    limit: BATCH_SIZE,
+                    before: lastMessageId // ID da mensagem mais antiga do lote anterior para rolar o histórico
+                };
+
+                // Pede o próximo lote de mensagens
+                const batch = await chat.fetchMessages(options);
+
+                if (batch.length === 0) {
+                    // Não há mais mensagens para buscar no histórico (chegou ao fim do chat)
+                    console.log(`[API LOG] -> Histórico finalizado após ${allMessages.length} mensagens buscadas.`);
+                    break; 
+                }
+
+                // Adiciona o novo lote de mensagens à lista total
+                allMessages.push(...batch);
+
+                // Pega a mensagem mais antiga (última no array 'batch')
+                const oldestMessage = batch[batch.length - 1];
+                lastMessageId = oldestMessage.id;
+                
+                // Se a mensagem mais antiga do lote for anterior (ou igual) ao início do dia,
+                // encontramos tudo o que precisávamos para cobrir o dia e podemos parar.
+                if (oldestMessage.timestamp <= start) {
+                    foundAllDay = true;
+                    console.log(`[API LOG] -> Data inicial (${dayjs.unix(start).format('DD/MM/YYYY')}) atingida. Total: ${allMessages.length} mensagens buscadas.`);
+                } else {
+                    console.log(`[API LOG] -> Buscando lote anterior. Total: ${allMessages.length} mensagens. Última mensagem em: ${dayjs.unix(oldestMessage.timestamp).format('DD/MM/YYYY HH:mm:ss')}`);
+                    // Adicionar um pequeno delay para evitar bloqueio
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                }
             }
+
+            // Depois de buscar o suficiente, aplicamos o filtro final para isolar APENAS o dia solicitado
+            let messages = allMessages.filter(m => m.timestamp >= start && m.timestamp <= end);
+            
+            if (messages.length === 0) {
+                // Se não houver mensagens no dia, continua para o próximo chat
+                continue; 
+            }
+
+            // Garante que as mensagens estão na ordem correta (por padrão, vêm do mais novo para o mais antigo, vamos ordenar)
+            messages.sort((a, b) => a.timestamp - b.timestamp);
+            // FIM DO NOVO MECANISMO DE BUSCA
 
             // Separador para o novo chat
             const chatSeparator = `\n\n=== CHAT: ${currentChatTitle} (${chat.id._serialized}) - ${messages.length} MENSAGENS ===\n\n`;
@@ -200,18 +239,13 @@ Chat(s) Processado(s): ${targetChatId ? chatTitle : 'Todos os Chats'}
             console.log(`[API LOG] -> Salvo ${messages.length} mensagens de ${currentChatTitle}`);
         }
 
-        console.log(`[API LOG] Concluído. Enviando arquivo para download: ${outFile}`);
+        console.log(`[API LOG] Concluído. Arquivo TXT gerado: ${outFile}`);
 
-        // Envia o arquivo para download e encerra a resposta HTTP
-        res.download(outFile, (err) => {
-            if (err) {
-                console.error('[API ERRO] Erro ao enviar arquivo para download:', err);
-                // Tenta enviar a mensagem de erro se o download falhar
-                // NOTA: Não podemos chamar res.status(500) aqui, pois os headers já foram enviados por res.download.
-                // Apenas logamos o erro no console.
-            } else {
-                console.log('[API LOG] Download do arquivo TXT iniciado pelo cliente.');
-            }
+        // Retorna o nome do arquivo para o cliente (interface)
+        res.json({
+            success: true,
+            filename: outFile,
+            message: `Arquivo ${outFile} gerado com sucesso no servidor.`
         });
 
     } catch (err) {
