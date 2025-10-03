@@ -1,5 +1,4 @@
-// api_export_server.js
-// Uso: node api_export_server.js
+// api_export_terminal_qr.js
 // npm i whatsapp-web.js qrcode-terminal dayjs express puppeteer
 
 const express = require('express');
@@ -14,46 +13,45 @@ const PORT = process.env.PORT || 3000;
 let isReady = false;
 
 const client = new Client({
-  authStrategy: new LocalAuth(), 
+  authStrategy: new LocalAuth(),
   puppeteer: {
-    headless: false,                 // mostra o navegador para você escanear e acompanhar
-    args: ['--no-sandbox','--disable-setuid-sandbox'],
-    // se tiver problemas de chromium, descomente e ajuste a linha abaixo para o caminho do seu Chrome:
-    // executablePath: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+    headless: true, // NÃO abre janela visível
+    args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage']
+    // Se der problema com headless, troque para headless: false temporariamente
   }
 });
 
 client.on('qr', qr => {
-  console.log('QR gerado — escaneie com WhatsApp (Dispositivos conectados -> Conectar dispositivo):');
+  console.log('---- QR (terminal) ----');
   qrcode.generate(qr, { small: true });
+  console.log('-----------------------\nEscaneie com WhatsApp → Dispositivos conectados → Conectar dispositivo');
 });
 
 client.on('ready', () => {
-  console.log('✅ WhatsApp conectado e pronto.');
+  console.log('✅ WhatsApp conectado (sessão pronta).');
   isReady = true;
 });
 
-client.on('auth_failure', msg => {
+client.on('auth_failure', (msg) => {
   console.error('Falha de autenticação:', msg);
   isReady = false;
 });
 
-client.on('disconnected', reason => {
+client.on('disconnected', (reason) => {
   console.log('Desconectado:', reason);
   isReady = false;
 });
 
 client.initialize();
 
-// endpoint de status
+// status
 app.get('/status', (req, res) => {
   res.json({ ready: isReady });
 });
 
-// endpoint para exportar mensagens do dia
+// exporta mensagens por data (chamada por curl ou navegador)
 app.get('/export', async (req, res) => {
-  if (!isReady) return res.status(400).send('Cliente não está pronto. Escaneie o QR primeiro.');
-
+  if (!isReady) return res.status(400).send('Cliente não está pronto. Escaneie o QR no terminal.');
   const date = req.query.date;
   if (!date) return res.status(400).send('Passe ?date=YYYY-MM-DD');
 
@@ -61,19 +59,21 @@ app.get('/export', async (req, res) => {
   const end = dayjs(date).endOf('day').unix();
   const outFile = `mensagens-${date}.jsonl`;
 
+  // stream de resposta para ver progressos no navegador/curl
   res.write(`Iniciando exportação para ${date}...\n`);
+
   try {
     const chats = await client.getChats();
     res.write(`Encontrados ${chats.length} chats. Iniciando varredura...\n`);
 
-    // apaga arquivo antigo se existir
+    // remove arquivo antigo
     if (fs.existsSync(outFile)) fs.unlinkSync(outFile);
 
     for (const chat of chats) {
-      res.write(`Processando chat: ${chat.name || chat.formattedTitle || chat.id._serialized}\n`);
-      // pega até 1000 mensagens recentes (pode ajustar)
+      res.write(`Processando: ${chat.name || chat.formattedTitle || chat.id._serialized}\n`);
+      // pega as últimas 1000 mensagens (se o dia for muito antigo, precisamos ajustar/implementar paginação)
       let messages = await chat.fetchMessages({ limit: 1000 });
-      // filtra por data
+      // filtra por data exata (timestamp em segundos)
       messages = messages.filter(m => m.timestamp >= start && m.timestamp <= end);
 
       if (messages.length === 0) {
@@ -91,6 +91,7 @@ app.get('/export', async (req, res) => {
         };
         fs.appendFileSync(outFile, JSON.stringify(entry) + '\n');
       }
+
       res.write(` -> salvo ${messages.length} mensagens deste chat\n`);
     }
 
@@ -98,10 +99,10 @@ app.get('/export', async (req, res) => {
     res.end();
   } catch (err) {
     console.error('Erro na exportação:', err);
-    res.status(500).send('Erro interno: ' + err.message);
+    res.status(500).send('Erro interno: ' + String(err));
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`API de exportação rodando em http://localhost:${PORT}`);
+  console.log(`API rodando em http://localhost:${PORT} — use /status e /export?date=YYYY-MM-DD`);
 });

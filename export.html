@@ -1,0 +1,29 @@
+<!-- export.html -->
+<!doctype html>
+<html>
+  <body>
+    <h3>Exportar mensagens por data</h3>
+    <input id="date" type="date" />
+    <button id="btn">Exportar</button>
+    <pre id="log"></pre>
+
+    <script>
+      document.getElementById('btn').onclick = async () => {
+        const date = document.getElementById('date').value;
+        if (!date) return alert('Escolha a data');
+        const log = document.getElementById('log');
+        log.textContent = 'Pedindo exportação...\n';
+        const resp = await fetch(`/export?date=${date}`);
+        const reader = resp.body.getReader();
+        const decoder = new TextDecoder();
+        while (true) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          log.textContent += decoder.decode(value);
+        }
+        log.textContent += '\nConcluído.';
+      };
+    </script>
+  </body>
+</html>
+
