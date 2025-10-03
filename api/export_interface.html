@@ -10,12 +10,25 @@
             font-family: 'Inter', sans-serif;
             background-color: #f7fafc;
         }
+        /* Estilo para o spinner de carregamento */
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            border-left-color: #fff;
+            animation: spin 1s ease infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
     </style>
 </head>
 <body class="p-4 sm:p-8 bg-gray-50 min-h-screen">
     <div class="max-w-4xl mx-auto bg-white p-6 sm:p-10 rounded-xl shadow-2xl border border-gray-100">
         <h1 class="text-3xl font-extrabold text-green-700 mb-2">Exportar Mensagens Simplificado</h1>
-        <p class="text-gray-600 mb-8">Preencha a data e o ID do contato para exportar. O arquivo JSONL será criado na sua pasta.</p>
+        <p class="text-gray-600 mb-8">Preencha a data e o ID do contato para exportar. O arquivo **TXT** será baixado automaticamente.</p>
 
         <!-- Formulário de Exportação -->
         <form id="exportForm" class="space-y-6">
@@ -33,9 +46,10 @@
                     class="w-full px-4 py-2 border border-red-400 rounded-lg shadow-sm focus:ring-green-500 focus:border-green-500 transition duration-150">
             </div>
 
-            <button type="submit"
-                class="w-full flex justify-center py-3 px-4 border border-transparent rounded-lg shadow-md text-base font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-150 transform hover:scale-[1.01]">
-                INICIAR EXPORTAÇÃO
+            <button type="submit" id="submitBtn"
+                class="w-full flex items-center justify-center py-3 px-4 border border-transparent rounded-lg shadow-md text-base font-medium text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 transition duration-150 transform hover:scale-[1.01]">
+                <span id="buttonText">INICIAR EXPORTAÇÃO</span>
+                <div id="loadingSpinner" class="spinner hidden ml-3"></div>
             </button>
         </form>
 
@@ -53,20 +67,20 @@
             </button>
 
             <div id="chatsListContainer" class="hidden max-h-64 overflow-y-auto bg-gray-100 p-4 rounded-lg text-sm">
-                <p class="text-gray-600 font-semibold mb-2">Copie o ID do chat desejado:</p>
+                <p class="text-gray-600 font-semibold mb-2">Clique no chat desejado para preencher o campo de número:</p>
                 <div id="chatsList" class="space-y-1">
                     <!-- Chats serão injetados aqui -->
                 </div>
             </div>
 
-            <h3 class="text-lg font-medium text-gray-800 mt-6 mb-2">Saída da Exportação:</h3>
-            <pre id="outputLog" class="whitespace-pre-wrap p-4 bg-gray-800 text-white rounded-lg text-xs h-40 overflow-y-scroll shadow-inner">O log do processo aparecerá aqui...</pre>
+            <h3 class="text-lg font-medium text-gray-800 mt-6 mb-2">Log de Download:</h3>
+            <pre id="outputLog" class="whitespace-pre-wrap p-4 bg-gray-800 text-white rounded-lg text-xs h-40 overflow-y-scroll shadow-inner">Ao iniciar a exportação, o arquivo será baixado diretamente. O log aqui exibirá apenas o status final.</pre>
         </div>
 
     </div>
 
     <script>
-        const PORT = 3000; // Ajuste se a porta da sua API for diferente
+        const PORT = 3000;
         const apiUrl = `http://localhost:${PORT}`;
         const exportForm = document.getElementById('exportForm');
         const outputLog = document.getElementById('outputLog');
@@ -75,6 +89,9 @@
         const chatsListContainer = document.getElementById('chatsListContainer');
         const chatsList = document.getElementById('chatsList');
         const chatIdInput = document.getElementById('chatId');
+        const submitBtn = document.getElementById('submitBtn');
+        const buttonText = document.getElementById('buttonText');
+        const loadingSpinner = document.getElementById('loadingSpinner');
 
         // Função utilitária para registrar no log
         function log(message, clear = false) {
@@ -83,6 +100,18 @@
             outputLog.scrollTop = outputLog.scrollHeight;
         }
         
+        // Função para mostrar/esconder o carregamento
+        function setProcessing(isProcessing) {
+            submitBtn.disabled = isProcessing;
+            if (isProcessing) {
+                buttonText.textContent = 'PROCESSANDO...';
+                loadingSpinner.classList.remove('hidden');
+            } else {
+                buttonText.textContent = 'INICIAR EXPORTAÇÃO';
+                loadingSpinner.classList.add('hidden');
+            }
+        }
+
         // 1. Verificar Status Inicial
         async function checkStatus() {
             try {
@@ -107,65 +136,54 @@
         // 2. Lidar com o Formulário de Exportação
         exportForm.addEventListener('submit', async (e) => {
             e.preventDefault();
+            setProcessing(true); // Inicia o carregamento
+
             if (!(await checkStatus())) {
                 log('Erro: O cliente WhatsApp não está pronto. Verifique o status.', true);
+                setProcessing(false);
                 return;
             }
 
             const date = document.getElementById('exportDate').value;
             const rawChatId = chatIdInput.value.trim();
 
-            if (!date) {
-                log('Por favor, selecione uma data.', true);
-                return;
-            }
-            
-            // NOVIDADE: Limpa o ID do chat (remove tudo que não for dígito) e adiciona o sufixo @c.us
-            const cleanedChatId = rawChatId.replace(/\D/g, ''); // Remove não-dígitos
+            // Lógica de validação e formatação (permanece a mesma)
+            const cleanedChatId = rawChatId.replace(/\D/g, ''); 
             
             if (!cleanedChatId) {
-                // Embora o 'required' do HTML já ajude, essa validação é extra
                 log('Erro: O ID do contato deve conter apenas números válidos.', true);
+                setProcessing(false);
                 return;
             }
 
-            const targetChatId = `${cleanedChatId}@c.us`; // Formato final para a API
+            const targetChatId = `${cleanedChatId}@c.us`;
 
             let exportUrl = `${apiUrl}/export?date=${date}&chatId=${encodeURIComponent(targetChatId)}`;
             
-            log(`Iniciando exportação para o Chat ID (formatado): ${targetChatId} na data: ${date}...`, true);
+            log(`Solicitando exportação para ${targetChatId} na data ${date}. O download começará automaticamente...`, true);
 
             try {
-                // Fetch para iniciar a exportação (API responde em stream)
+                // O fetch é feito e o navegador cuidará do download (res.download)
                 const response = await fetch(exportUrl);
                 
                 if (!response.ok) {
+                    // Se houver erro, a resposta é texto simples com a mensagem de erro
                     const errorText = await response.text();
                     log(`ERRO na API: ${errorText}`);
-                    return;
+                } else {
+                    // Se OK (200), o navegador inicia o download automaticamente
+                    log(`\n✅ EXPORTAÇÃO CONCLUÍDA! O arquivo .TXT foi baixado no seu PC.`);
                 }
-
-                // Lê a resposta em stream (chunks) para mostrar o progresso em tempo real
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder('utf-8');
                 
-                let result = '';
-                while (true) {
-                    const { done, value } = await reader.read();
-                    if (done) break;
-                    
-                    const chunk = decoder.decode(value, { stream: true });
-                    result += chunk;
-                    log(chunk); // Adiciona o chunk ao log
-                }
-                log(`\nExportação finalizada! Verifique o arquivo .jsonl na pasta do servidor.`);
 
             } catch (error) {
-                log(`Erro de conexão durante a exportação: ${error.message}`);
+                log(`Erro de conexão ou rede: ${error.message}.`);
+            } finally {
+                setProcessing(false);
             }
         });
 
-        // 3. Listar Chats
+        // 3. Listar Chats (sem alterações funcionais)
         showChatsBtn.addEventListener('click', async () => {
             if (!(await checkStatus())) {
                 log('A API não está pronta. Não é possível listar os chats. Verifique o terminal para o QR Code.', true);
@@ -181,7 +199,7 @@
                     const response = await fetch(`${apiUrl}/chats`);
                     const data = await response.json();
 
-                    chatsList.innerHTML = ''; // Limpa antes de popular
+                    chatsList.innerHTML = ''; 
 
                     if (data.length === 0) {
                         chatsList.innerHTML = '<p class="text-center text-gray-500">Nenhum chat encontrado.</p>';
@@ -195,12 +213,11 @@
                         
                         // Clique para Copiar e Preencher
                         div.addEventListener('click', () => {
-                            // NOVIDADE: Preenche o campo apenas com o número, sem o @c.us
                             const simpleId = chat.id.split('@')[0]; 
-                            chatIdInput.value = simpleId; // Preenche o campo
+                            chatIdInput.value = simpleId; 
                             log(`ID do Chat (apenas número) copiado e preenchido no campo: ${simpleId}`);
-                            chatsListContainer.classList.add('hidden'); // Oculta após seleção
-                            showChatsBtn.textContent = 'Passo 1: Listar Todos os Chat IDs'; // Volta o botão
+                            chatsListContainer.classList.add('hidden'); 
+                            showChatsBtn.textContent = 'Passo 1: Listar Todos os Chat IDs'; 
                         });
                         
                         chatsList.appendChild(div);
@@ -220,7 +237,6 @@
         // Inicialização
         document.addEventListener('DOMContentLoaded', () => {
             checkStatus();
-            // Define a data atual como padrão no campo
             const today = new Date().toISOString().split('T')[0];
             document.getElementById('exportDate').value = today;
         });
