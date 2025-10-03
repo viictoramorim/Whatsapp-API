@@ -1,84 +1,62 @@
 // save_whatsapp_day.js
-// npm i whatsapp-web.js qrcode-terminal dayjs fs
+// npm i whatsapp-web.js qrcode-terminal dayjs
 const { Client, LocalAuth } = require('whatsapp-web.js');
 const qrcode = require('qrcode-terminal');
 const fs = require('fs');
 const dayjs = require('dayjs');
 
+// Pega a data do argumento
 if (process.argv.length < 3) {
     console.log('Uso: node save_whatsapp_day.js YYYY-MM-DD');
     process.exit(1);
 }
-
 const targetDate = process.argv[2]; // ex: 2025-10-02
 const start = dayjs(targetDate).startOf('day').unix(); // timestamp em segundos
 const end = dayjs(targetDate).endOf('day').unix();
 
 const client = new Client({
     authStrategy: new LocalAuth(),
-    puppeteer: { headless: true, args: ['--no-sandbox'] }
+    puppeteer: { headless: false } // mostra o navegador para evitar erros de execução
 });
 
 client.on('qr', qr => qrcode.generate(qr, { small: true }));
 client.on('ready', async () => {
-    console.log('✅ WhatsApp conectado! Varredura iniciada para', targetDate);
-
+    console.log('Conectado. Varredura iniciada para', targetDate);
     try {
         const chats = await client.getChats();
         const outFile = `mensagens-${targetDate}.jsonl`;
-        console.log('📁 Processando', chats.length, 'chats...');
 
         for (const chat of chats) {
-            console.log('🔹 Chat:', chat.name || chat.formattedTitle || chat.id._serialized);
-            let allMessages = [];
-            let lastId = null;
+            console.log('Processando chat:', chat.name || chat.formattedTitle || chat.id._serialized);
 
-            // Paginação automática
-            while (true) {
-                const opts = lastId ? { limit: 1000, before: lastId } : { limit: 1000 };
-                const msgs = await chat.fetchMessages(opts);
-                if (!msgs || msgs.length === 0) break;
+            // busca até 1000 mensagens (ajuste se quiser mais)
+            let messages = await chat.fetchMessages({ limit: 1000 });
 
-                allMessages = allMessages.concat(msgs);
-                lastId = msgs[msgs.length - 1].id._serialized;
+            // filtra por data
+            messages = messages.filter(m => m.timestamp >= start && m.timestamp <= end);
 
-                // Para não continuar indefinidamente
-                if (msgs[msgs.length - 1].timestamp < start) break;
+            if (messages.length === 0) continue;
+
+            for (const m of messages) {
+                // salva só texto
+                const entry = {
+                    chatId: chat.id._serialized,
+                    chatTitle: chat.name || chat.formattedTitle || null,
+                    from: m.from,
+                    author: m.author || null,
+                    timestamp: m.timestamp,
+                    body: m.hasMedia ? '[MÍDIA]' : m.body
+                };
+                fs.appendFileSync(outFile, JSON.stringify(entry) + '\n');
             }
-
-            // Filtra por data
-            const filtered = allMessages.filter(m => m.timestamp >= start && m.timestamp <= end);
-
-            if (filtered.length === 0) continue;
-
-            for (const m of filtered) {
-                if (m.hasMedia) {
-                    // Ignora download de mídia, mas salva metadados
-                    fs.appendFileSync(outFile, JSON.stringify({
-                        chatTitle: chat.name || chat.formattedTitle,
-                        from: m.from,
-                        timestamp: m.timestamp,
-                        hasMedia: true
-                    }) + '\n');
-                } else {
-                    fs.appendFileSync(outFile, JSON.stringify({
-                        chatTitle: chat.name || chat.formattedTitle,
-                        from: m.from,
-                        body: m.body,
-                        timestamp: m.timestamp
-                    }) + '\n');
-                }
-            }
-
-            console.log('   -> salvo', filtered.length, 'mensagens deste chat');
+            console.log(' -> salvo', messages.length, 'mensagens deste chat');
         }
 
-        console.log('🎉 Concluído! Arquivo:', outFile);
+        console.log('Concluído. Arquivo:', outFile);
         await client.destroy();
         process.exit(0);
-
     } catch (err) {
-        console.error('❌ Erro durante a varredura:', err);
+        console.error('Erro durante a varredura:', err);
         await client.destroy();
         process.exit(1);
     }
