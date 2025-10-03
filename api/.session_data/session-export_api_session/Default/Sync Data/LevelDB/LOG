@@ -1,3 +1,4 @@
-2025/10/02-23:40:30.905 4c14 Reusing MANIFEST C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\Sync Data\LevelDB/MANIFEST-000001
-2025/10/02-23:40:30.906 4c14 Recovering log #3
-2025/10/02-23:40:30.906 4c14 Reusing old log C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\Sync Data\LevelDB/000003.log 
+2025/10/02-23:42:43.593 4144 Creating DB C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\Sync Data\LevelDB since it was missing.
+2025/10/02-23:42:43.611 4144 Reusing MANIFEST C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\Sync Data\LevelDB/MANIFEST-000001
+2025/10/02-23:42:43.611 4144 Recovering log #3
+2025/10/02-23:42:43.612 4144 Reusing old log C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\Sync Data\LevelDB/000003.log 

@@ -7,6 +7,9 @@ const dayjs = require('dayjs');
 const qrcode = require('qrcode-terminal');
 const { Client, LocalAuth } = require('whatsapp-web.js');
 
+// Para estabilidade do Puppeteer
+const puppeteer = require('puppeteer');
+
 // Adiciona o plugin para formatar o timestamp de forma legível
 const customParseFormat = require('dayjs/plugin/customParseFormat');
 const utc = require('dayjs/plugin/utc');
@@ -30,17 +33,15 @@ const client = new Client({
   puppeteer: {
     headless: false,
     slowMo: 100, 
+    // Usar o caminho do executável para garantir que o Chromium seja encontrado
+    executablePath: puppeteer.executablePath(), 
     args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
-        '--disable-extensions',
-        '--disable-background-networking',
-        '--disable-background-timer-throttling',
-        '--disable-renderer-backgrounding',
-        '--disable-device-discovery-notifications',
+        // Removidas flags potencialmente instáveis
+        '--disable-extensions',
         '--disable-gpu',
-        '--single-process'
     ]
   }
 });
@@ -66,7 +67,20 @@ client.on('disconnected', (reason) => {
   isReady = false;
 });
 
-client.initialize();
+// Tratamento de inicialização assíncrona
+async function initializeClient() {
+    try {
+        console.log('Iniciando cliente WhatsApp...');
+        await client.initialize();
+    } catch (error) {
+        console.error('❌ Erro na inicialização do cliente:', error.message);
+        // Tenta reiniciar ou apenas falha com uma mensagem clara
+        // Se este erro ocorrer, é melhor revisar a instalação do puppeteer
+    }
+}
+
+initializeClient();
+
 
 // Middleware para servir arquivos estáticos (como export_interface.html)
 app.use(express.static(__dirname));

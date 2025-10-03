@@ -1,3 +1,4 @@
-2025/10/02-23:40:31.666 3490 Reusing MANIFEST C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\shared_proto_db/MANIFEST-000001
-2025/10/02-23:40:31.666 3490 Recovering log #3
-2025/10/02-23:40:31.669 3490 Reusing old log C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\shared_proto_db/000003.log 
+2025/10/02-23:42:44.100 4b24 Creating DB C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\shared_proto_db since it was missing.
+2025/10/02-23:42:44.116 4b24 Reusing MANIFEST C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\shared_proto_db/MANIFEST-000001
+2025/10/02-23:42:44.116 4b24 Recovering log #3
+2025/10/02-23:42:44.117 4b24 Reusing old log C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\shared_proto_db/000003.log 

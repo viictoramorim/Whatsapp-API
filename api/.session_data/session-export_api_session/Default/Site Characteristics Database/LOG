@@ -1,3 +1,4 @@
-2025/10/02-23:40:30.851 2518 Reusing MANIFEST C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\Site Characteristics Database/MANIFEST-000001
-2025/10/02-23:40:30.852 2518 Recovering log #3
-2025/10/02-23:40:30.853 2518 Reusing old log C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\Site Characteristics Database/000003.log 
+2025/10/02-23:42:43.588 ce8 Creating DB C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\Site Characteristics Database since it was missing.
+2025/10/02-23:42:43.610 ce8 Reusing MANIFEST C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\Site Characteristics Database/MANIFEST-000001
+2025/10/02-23:42:43.611 ce8 Recovering log #3
+2025/10/02-23:42:43.611 ce8 Reusing old log C:\Users\Joao\Documents\whatsapp-api\api\.session_data\session-export_api_session\Default\Site Characteristics Database/000003.log 
