@@ -12,104 +12,151 @@ const PORT = process.env.PORT || 3000;
 
 let isReady = false;
 
+// Configuração do Cliente WhatsApp
 const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: {
-    headless: false, // NÃO abre janela visível
-    args: ['--no-sandbox',
-    '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
-    '--disable-extensions',
-    '--disable-background-networking',
-    '--disable-background-timer-throttling',
-    '--disable-renderer-backgrounding',
-    '--disable-device-discovery-notifications']
-    // Se der problema com headless, troque para headless: false temporariamente
-  }
+  authStrategy: new LocalAuth({ clientId: 'export_api_session' }), // Usando LocalAuth para persistência da sessão
+  puppeteer: {
+    headless: false, // Mantido como false para visualização (opcionalmente mude para true)
+    slowMo: 100, // Pequeno delay para estabilizar a injeção do script do whatsapp-web.js
+    args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-background-timer-throttling',
+        '--disable-renderer-backgrounding',
+        '--disable-device-discovery-notifications',
+        '--disable-gpu',
+        '--single-process'
+    ]
+  }
 });
 
 client.on('qr', qr => {
-  console.log('---- QR (terminal) ----');
-  qrcode.generate(qr, { small: true });
-  console.log('-----------------------\nEscaneie com WhatsApp → Dispositivos conectados → Conectar dispositivo');
+  console.log('---- QR (terminal) ----');
+  qrcode.generate(qr, { small: true });
+  console.log('-----------------------\nEscaneie com WhatsApp → Dispositivos conectados → Conectar dispositivo');
 });
 
 client.on('ready', () => {
-  console.log('✅ WhatsApp conectado (sessão pronta).');
-  isReady = true;
+  console.log('✅ WhatsApp conectado (sessão pronta).');
+  isReady = true;
 });
 
 client.on('auth_failure', (msg) => {
-  console.error('Falha de autenticação:', msg);
-  isReady = false;
+  console.error('Falha de autenticação. Tente excluir a pasta de sessão (.wwebjs_auth) e escanear o QR novamente.', msg);
+  isReady = false;
 });
 
 client.on('disconnected', (reason) => {
-  console.log('Desconectado:', reason);
-  isReady = false;
+  console.log('Desconectado:', reason);
+  isReady = false;
 });
 
 client.initialize();
 
 // status
 app.get('/status', (req, res) => {
-  res.json({ ready: isReady });
+  res.json({ ready: isReady });
 });
 
-// exporta mensagens por data (chamada por curl ou navegador)
-app.get('/export', async (req, res) => {
-  if (!isReady) return res.status(400).send('Cliente não está pronto. Escaneie o QR no terminal.');
-  const date = req.query.date;
-  if (!date) return res.status(400).send('Passe ?date=YYYY-MM-DD');
-
-  const start = dayjs(date).startOf('day').unix();
-  const end = dayjs(date).endOf('day').unix();
-  const outFile = `mensagens-${date}.jsonl`;
-
-  // stream de resposta para ver progressos no navegador/curl
-  res.write(`Iniciando exportação para ${date}...\n`);
-
-  try {
-    const chats = await client.getChats();
-    res.write(`Encontrados ${chats.length} chats. Iniciando varredura...\n`);
-
-    // remove arquivo antigo
-    if (fs.existsSync(outFile)) fs.unlinkSync(outFile);
-
-    for (const chat of chats) {
-      res.write(`Processando: ${chat.name || chat.formattedTitle || chat.id._serialized}\n`);
-      // pega as últimas 1000 mensagens (se o dia for muito antigo, precisamos ajustar/implementar paginação)
-      let messages = await chat.fetchMessages({ limit: 1000 });
-      // filtra por data exata (timestamp em segundos)
-      messages = messages.filter(m => m.timestamp >= start && m.timestamp <= end);
-
-      if (messages.length === 0) {
-        continue;
-      }
-
-      for (const m of messages) {
-        const entry = {
-          chatId: chat.id._serialized,
-          chatTitle: chat.name || chat.formattedTitle || null,
-          from: m.from,
-          author: m.author || null,
-          timestamp: m.timestamp,
-          body: m.hasMedia ? '[MÍDIA]' : (m.body || '')
-        };
-        fs.appendFileSync(outFile, JSON.stringify(entry) + '\n');
-      }
-
-      res.write(` -> salvo ${messages.length} mensagens deste chat\n`);
+// NOVO ENDPOINT: Lista todos os chats e seus IDs
+app.get('/chats', async (req, res) => {
+    if (!isReady) return res.status(400).send('Cliente não está pronto. Escaneie o QR no terminal.');
+    
+    try {
+        const chats = await client.getChats();
+        const chatList = chats.map(chat => ({
+            id: chat.id._serialized,
+            name: chat.name || chat.formattedTitle || 'N/A',
+            isGroup: chat.isGroup
+        }));
+        res.json(chatList);
+    } catch (err) {
+        console.error('Erro ao listar chats:', err);
+        res.status(500).send('Erro interno ao buscar lista de chats.');
     }
-
-    res.write(`Concluído. Arquivo: ${outFile}\n`);
-    res.end();
-  } catch (err) {
-    console.error('Erro na exportação:', err);
-    res.status(500).send('Erro interno: ' + String(err));
-  }
 });
 
-app.listen(PORT, () => {
-  console.log(`API rodando em http://localhost:${PORT} — use /status e /export?date=YYYY-MM-DD`);
+
+// exporta mensagens por data E (opcionalmente) por contato
+app.get('/export', async (req, res) => {
+  if (!isReady) return res.status(400).send('Cliente não está pronto. Escaneie o QR no terminal.');
+  
+  const date = req.query.date;
+  const targetChatId = req.query.chatId; // Novo parâmetro opcional: o ID do contato/chat (ex: 55XXYYYYYYYYY@c.us)
+  
+  if (!date) return res.status(400).send('Passe ?date=YYYY-MM-DD');
+
+  const start = dayjs(date).startOf('day').unix();
+  const end = dayjs(date).endOf('day').unix();
+  
+  let chatsToProcess = [];
+  let outFile = `mensagens-${date}`;
+
+  // Lógica de Filtragem de Chat
+  try {
+    if (targetChatId) {
+      // 1. Exporta apenas o chat específico
+      res.write(`Buscando chat específico: ${targetChatId}...\n`);
+      const chat = await client.getChatById(targetChatId);
+      
+      if (!chat) {
+        return res.status(404).send(`Chat com ID ${targetChatId} não encontrado. Certifique-se de usar o formato 55XXYYYYYYYYY@c.us.`);
+      }
+      chatsToProcess.push(chat);
+      // Nomeia o arquivo com parte do número para fácil identificação
+      outFile += `-${targetChatId.split('@')[0]}`; 
+    } else {
+      // 2. Comportamento original: Exporta todos os chats
+      res.write('Buscando todos os chats...\n');
+      chatsToProcess = await client.getChats();
+    }
+  } catch (err) {
+    console.error('Erro ao buscar chat(s):', err);
+    return res.status(500).send('Erro interno ao buscar chats: ' + String(err));
+  }
+
+  outFile += '.jsonl';
+
+  res.write(`Encontrados ${chatsToProcess.length} chat(s) para processar. Iniciando varredura...\n`);
+
+  // remove arquivo antigo
+  if (fs.existsSync(outFile)) fs.unlinkSync(outFile);
+
+  for (const chat of chatsToProcess) {
+        // Pequeno atraso para evitar ser bloqueado ao iterar por muitos chats
+        await new Promise(resolve => setTimeout(resolve, 500)); 
+
+      res.write(`Processando: ${chat.name || chat.formattedTitle || chat.id._serialized}\n`);
+      
+      // Pega as últimas 1000 mensagens. Se o dia for muito antigo, será necessário 
+      // implementar paginação avançada.
+      let messages = await chat.fetchMessages({ limit: 1000 });
+      
+      // filtra por data exata (timestamp em segundos)
+      messages = messages.filter(m => m.timestamp >= start && m.timestamp <= end);
+
+      if (messages.length === 0) {
+        continue;
+      }
+
+      for (const m of messages) {
+        const entry = {
+          chatId: chat.id._serialized,
+          chatTitle: chat.name || chat.formattedTitle || null,
+          from: m.from,
+          author: m.author || null,
+          timestamp: m.timestamp,
+          body: m.hasMedia ? '[MÍDIA]' : (m.body || '')
+        };
+        fs.appendFileSync(outFile, JSON.stringify(entry) + '\n');
+      }
+
+      res.write(` -> salvo ${messages.length} mensagens deste chat\n`);
+    }
+
+    res.write(`Concluído. Arquivo salvo: ${outFile}\n`);
+    res.end();
 });
