@@ -5,9 +5,9 @@ const express = require('express');
 const fs = require('fs');
 const dayjs = require('dayjs');
 const qrcode = require('qrcode-terminal');
-const { Client } = require('whatsapp-web.js'); // Removido o import do LocalAuth
+const { Client } = require('whatsapp-web.js');
 
-// Adiciona o plugin para formatar o timestamp de forma legível
+// Adiciona os plugins do dayjs para formatação e manipulação de fuso horário
 const customParseFormat = require('dayjs/plugin/customParseFormat');
 const utc = require('dayjs/plugin/utc');
 const timezone = require('dayjs/plugin/timezone');
@@ -27,7 +27,7 @@ const client = new Client({
   puppeteer: {
     // BROWSER VISÍVEL
     headless: false,
-    slowMo: 100, 
+    slowMo: 250, // AUMENTADO PARA MAIOR ESTABILIDADE EM BUSCAS ANTIGAS
     
     // ATENÇÃO: Se quiser usar o seu Google Chrome normal (não o de teste),
     // DESCOMENTE a linha abaixo e COLOQUE O CAMINHO CORRETO do executável.
@@ -112,31 +112,62 @@ app.get('/export', async (req, res) => {
   if (!isReady) return res.status(400).send('Cliente não está pronto. Escaneie o QR no terminal.');
   
   const date = req.query.date;
-  const targetChatId = req.query.chatId;
+  let targetChatId = req.query.chatId; // Usamos LET para poder limpar o valor
+  
+    // NOVOS PARAMETROS DE HORA (opcional)
+  const startTime = req.query.startTime || '00:00'; 
+  const endTime = req.query.endTime || '23:59'; 
   
   if (!date) return res.status(400).send('Passe ?date=YYYY-MM-DD');
 
+    // ** SANITIZAÇÃO E FORMATAÇÃO DO CHAT ID (PADRONIZAÇÃO) **
+    if (targetChatId) {
+        // 1. Limpeza: Remove todos os caracteres que NÃO SÃO números, '@' ou '.'
+        targetChatId = targetChatId.replace(/[^0-9@.]/g, ''); 
+
+        // 2. Padronização: Se o ID limpo não contiver '@', assume que é um contato e adiciona '@c.us'.
+        if (!targetChatId.includes('@') && targetChatId.length > 0) {
+            targetChatId = `${targetChatId}@c.us`;
+            console.log(`[API LOG] Chat ID padronizado para: ${targetChatId}`);
+        }
+    }
+    // **********************************************************
+
     // Inicio do bloco TRY principal para toda a lógica de exportação
     try { 
-        // Define o início (00:00:00) e o fim (23:59:59) do dia para a filtragem
-        const start = dayjs(date).startOf('day').unix();
-        const end = dayjs(date).endOf('day').unix();
+        // Combina a data com a hora para criar a string de data/hora completa
+        const startDateTimeString = `${date} ${startTime}`;
+        const endDateTimeString = `${date} ${endTime}`;
+        
+        // Define o intervalo em Unix Timestamp (segundos)
+        // Usamos o formato 'YYYY-MM-DD HH:mm' para garantir a correta interpretação.
+        const start = dayjs(startDateTimeString, 'YYYY-MM-DD HH:mm').unix();
+        const end = dayjs(endDateTimeString, 'YYYY-MM-DD HH:mm').unix();
         
         let chatsToProcess = [];
         let chatTitle = 'MultiplosChats'; 
-        let fileNameBase = `${date}`;
+        let fileNameBase = `${date}_${startTime.replace(':', '')}-${endTime.replace(':', '')}`; // Adiciona hora no nome do arquivo
 
         // Lógica de Filtragem de Chat
         if (targetChatId) {
             console.log(`[API LOG] Buscando chat específico: ${targetChatId}...`);
-            const chat = await client.getChatById(targetChatId);
-            
+            let chat;
+            try {
+                // Tenta buscar o chat pelo ID fornecido
+                // O tratamento de erro aqui intercepta o erro 'Evaluation failed: b'
+                chat = await client.getChatById(targetChatId);
+            } catch (e) {
+                // TRATAMENTO DE ERRO APRIMORADO
+                console.error('[API ERRO] Falha ao buscar Chat ID. Verifique o formato:', e);
+                return res.status(400).send(`❌ ERRO: O Chat ID fornecido (${targetChatId}) é inválido ou não foi encontrado. Certifique-se de que o ID está correto (ex: 5511999999999@c.us) e o WhatsApp está conectado. Detalhe: ${e.message}`);
+            }
+
             if (!chat) {
-                return res.status(404).send(`Chat com ID ${targetChatId} não encontrado.`);
+                return res.status(404).send(`Chat com ID ${targetChatId} não encontrado. Verifique se o ID está correto e se o chat existe na sua lista.`);
             }
             chatsToProcess.push(chat);
             chatTitle = chat.name || chat.formattedTitle || targetChatId.split('@')[0];
-            fileNameBase = `${date}-${targetChatId.split('@')[0]}`; 
+            fileNameBase = `${date}-${targetChatId.split('@')[0]}_${startTime.replace(':', '')}-${endTime.replace(':', '')}`; 
         } else {
             console.log('[API LOG] Buscando todos os chats...');
             chatsToProcess = await client.getChats();
@@ -149,10 +180,10 @@ app.get('/export', async (req, res) => {
         // remove arquivo antigo
         if (fs.existsSync(outFile)) fs.unlinkSync(outFile);
 
-        // Cabeçalho do Arquivo TXT
+        // Cabeçalho do Arquivo TXT (Atualizado para incluir o horário)
         const header = `--- EXPORTAÇÃO DE MENSAGENS WHATSAPP ---
 Data da Exportação: ${dayjs().tz('America/Sao_Paulo').format('YYYY-MM-DD HH:mm:ss')}
-Período Buscado: ${date} (Dia Completo)
+Período Buscado: ${date} das ${startTime}h às ${endTime}h
 Chat(s) Processado(s): ${targetChatId ? chatTitle : 'Todos os Chats'}
 ------------------------------------------------------\n\n`;
         fs.appendFileSync(outFile, header);
@@ -164,61 +195,74 @@ Chat(s) Processado(s): ${targetChatId ? chatTitle : 'Todos os Chats'}
             const currentChatTitle = chat.name || chat.formattedTitle || chat.id._serialized;
             console.log(`[API LOG] Processando: ${currentChatTitle}`);
             
-            // NOVO: Mecanismo de paginação para buscar todas as mensagens necessárias para cobrir o dia.
+            // =========================================================================
+            // LÓGICA DE BUSCA PAGINADA (para garantir que pegue mensagens antigas)
+            // =========================================================================
+            const BATCH_SIZE = 1000; // Lotes menores para maior estabilidade
             let allMessages = [];
-            let lastMessageId = null;
-            // Reduzido para 1000 para maior estabilidade em cada passo da paginação profunda
-            const BATCH_SIZE = 1000; 
-            let foundAllDay = false;
+            let oldestMessageTimestamp = Infinity;
+            let targetDateCovered = false;
 
-            console.log(`[API LOG] -> Iniciando busca paginada para ${currentChatTitle}...`);
+            console.log(`[API LOG] Iniciando busca paginada para cobrir o período.`);
 
-            // Continuar buscando em batches (lotes) até que a primeira mensagem buscada seja anterior ao início do dia (start)
-            while (!foundAllDay) {
-                const options = {
+            while (!targetDateCovered) {
+                // Configura as opções de busca para buscar o lote antes da mensagem mais antiga já encontrada
+                let options = { 
                     limit: BATCH_SIZE,
-                    before: lastMessageId // ID da mensagem mais antiga do lote anterior para rolar o histórico
+                    // Se oldestMessageTimestamp for Infinity (primeira rodada), 'before' é undefined e a API pega as mensagens mais recentes
+                    before: oldestMessageTimestamp !== Infinity ? oldestMessageTimestamp : undefined
                 };
 
-                // Pede o próximo lote de mensagens
-                const batch = await chat.fetchMessages(options);
-
-                if (batch.length === 0) {
-                    // Não há mais mensagens para buscar no histórico (chegou ao fim do chat)
-                    console.log(`[API LOG] -> Histórico finalizado após ${allMessages.length} mensagens buscadas.`);
-                    break; 
+                let newMessages;
+                try {
+                    newMessages = await chat.fetchMessages(options);
+                } catch (e) {
+                    console.error('[API ERRO] Falha na busca paginada para este chat. Interrompendo.', e.message);
+                    break; // Interrompe o loop para evitar crash
                 }
 
-                // Adiciona o novo lote de mensagens à lista total
-                allMessages.push(...batch);
+                if (newMessages.length === 0) {
+                    console.log('[API LOG] Fim do histórico do chat alcançado.');
+                    break; // Não há mais mensagens para buscar
+                }
 
-                // Pega a mensagem mais antiga (última no array 'batch')
-                const oldestMessage = batch[batch.length - 1];
-                lastMessageId = oldestMessage.id;
+                // A última mensagem do lote é a mais antiga
+                const oldestNewMessage = newMessages[newMessages.length - 1];
                 
-                // Se a mensagem mais antiga do lote for anterior (ou igual) ao início do dia,
-                // encontramos tudo o que precisávamos para cobrir o dia e podemos parar.
-                if (oldestMessage.timestamp <= start) {
-                    foundAllDay = true;
-                    console.log(`[API LOG] -> Data inicial (${dayjs.unix(start).format('DD/MM/YYYY')}) atingida. Total: ${allMessages.length} mensagens buscadas.`);
+                // 1. Atualiza o timestamp da mensagem mais antiga para a próxima iteração
+                oldestMessageTimestamp = oldestNewMessage.timestamp;
+
+                // 2. Adiciona o novo lote à lista total
+                allMessages.push(...newMessages);
+                
+                // 3. Verifica se a mensagem mais antiga do lote já é ANTERIOR ou igual ao início do dia (start).
+                // Se o timestamp da mensagem mais antiga for MENOR que o início do dia, a busca pode parar.
+                if (oldestNewMessage.timestamp <= start) {
+                    targetDateCovered = true;
+                    console.log(`[API LOG] Data inicial (${dayjs.unix(start).format('DD/MM HH:mm')}) alcançada. Parando a busca.`);
                 } else {
-                    console.log(`[API LOG] -> Buscando lote anterior. Total: ${allMessages.length} mensagens. Última mensagem em: ${dayjs.unix(oldestMessage.timestamp).format('DD/MM/YYYY HH:mm:ss')}`);
-                    // Adicionar um pequeno delay para evitar bloqueio
-                    await new Promise(resolve => setTimeout(resolve, 300));
+                    console.log(`[API LOG] Última mensagem encontrada: ${dayjs.unix(oldestNewMessage.timestamp).format('DD/MM HH:mm')}. Continuando...`);
+                }
+
+                // Pequeno atraso para evitar ser bloqueado (só atrasa se estivermos indo buscar mais)
+                if (!targetDateCovered) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
                 }
             }
 
-            // Depois de buscar o suficiente, aplicamos o filtro final para isolar APENAS o dia solicitado
-            let messages = allMessages.filter(m => m.timestamp >= start && m.timestamp <= end);
+            let messages = allMessages; 
+            
+            // Aplicamos o filtro final para isolar o período solicitado (data e hora)
+            messages = messages.filter(m => m.timestamp >= start && m.timestamp <= end);
+            // =========================================================================
             
             if (messages.length === 0) {
-                // Se não houver mensagens no dia, continua para o próximo chat
+                // Se não houver mensagens no período, continua para o próximo chat
                 continue; 
             }
 
-            // Garante que as mensagens estão na ordem correta (por padrão, vêm do mais novo para o mais antigo, vamos ordenar)
+            // Garante que as mensagens estão na ordem correta
             messages.sort((a, b) => a.timestamp - b.timestamp);
-            // FIM DO NOVO MECANISMO DE BUSCA
 
             // Separador para o novo chat
             const chatSeparator = `\n\n=== CHAT: ${currentChatTitle} (${chat.id._serialized}) - ${messages.length} MENSAGENS ===\n\n`;
@@ -227,12 +271,14 @@ Chat(s) Processado(s): ${targetChatId ? chatTitle : 'Todos os Chats'}
             for (const m of messages) {
                 // Formata o timestamp (segundos) para data/hora local
                 const time = dayjs.unix(m.timestamp).tz('America/Sao_Paulo').format('HH:mm:ss');
-                // Identifica o autor
-                const author = m.author || m.fromMe ? 'EU' : m.from.split('@')[0];
+                
+                // IDENTIFICA O ID/NÚMERO COMPLETO (ex: 5511999999999@c.us)
+                const senderId = m.fromMe ? 'EU' : m.from; 
+                
                 const body = m.hasMedia ? '[MÍDIA/ARQUIVO ANEXADO]' : (m.body || '[Mensagem sem corpo]');
                 
-                // Formato de texto simples
-                const entry = `[${time}] [De: ${author}] - ${body}`;
+                // Formato de texto simples: [Hora] [ID_Completo] - Mensagem
+                const entry = `[${time}] [${senderId}] - ${body}`;
                 fs.appendFileSync(outFile, entry + '\n');
             }
 
@@ -249,9 +295,8 @@ Chat(s) Processado(s): ${targetChatId ? chatTitle : 'Todos os Chats'}
         });
 
     } catch (err) {
-        // Bloco CATCH ÚNICO: Captura erros da busca de chat, fetch de mensagens, ou escrita de arquivo.
-        console.error('[API ERRO] Erro na exportação:', err);
-        // Se a resposta ainda não foi enviada, enviamos o erro.
+        // Bloco CATCH ÚNICO: Captura erros gerais de exportação
+        console.error('[API ERRO] Erro geral na exportação:', err);
         if (!res.headersSent) {
             res.status(500).send('Erro interno no servidor durante a exportação: ' + String(err));
         }
